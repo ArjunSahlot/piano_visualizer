@@ -1,14 +1,12 @@
 import os
-import time
 import cv2
 import pygame
 
 
-class Video:
+class Piano:
     def __init__(self, resolution, fps):
         self.resolution = resolution
         self.fps = fps
-        self.piano = Piano()
     
     def add_midi(self, path):
         pass
@@ -37,12 +35,6 @@ class Video:
         video.write(image)
         cv2.destroyAllWindows()
         cv2.imshow(image)
-
-
-
-class Piano:
-    def __init__(self):
-        pass
-
-    def render(self, frame, resolution):
+    
+    def render(self, frame):
         pass
