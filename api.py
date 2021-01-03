@@ -32,7 +32,7 @@ class Piano:
 
         self.ranges.append((minimum - self.gap, maximum + self.gap))
         self.midis.append(parsed)
-        self.status.append([False]*(maximum - minimum + 2*self.gap + 1))
+        self.status.append([0]*(maximum - minimum + 2*self.gap + 1))
 
 
     def export(self, path, verbose=False, frac_frames=1):
@@ -146,9 +146,9 @@ class Piano:
             black_keys = []
             for j in range(range_keys[0], range_keys[1]+1):
                 if self.is_black(j):
-                    black_keys.append((surf, RED if status[j - range_keys[0]] else BLACK, (width/2 - keys_width/2 + (counter+1)*(key_width + gap) - gap/2 - key_width*blackkey_width_factor/2, y, key_width*blackkey_width_factor, blackkey_height)))
+                    black_keys.append((surf, (status[j - range_keys[0]] * 2.55, 0, 0), (width/2 - keys_width/2 + (counter+1)*(key_width + gap) - gap/2 - key_width*blackkey_width_factor/2, y, key_width*blackkey_width_factor, blackkey_height)))
                 else:
-                    pygame.draw.rect(surf, RED if status[j - range_keys[0]] else WHITE, (width/2 - keys_width/2 + counter*(key_width + gap), y, key_width, whitekey_height))
+                    pygame.draw.rect(surf, (255, 255 - status[j - range_keys[0]] * 2.55, 255 - status[j - range_keys[0]] * 2.55), (width/2 - keys_width/2 + counter*(key_width + gap), y, key_width, whitekey_height))
                     counter += 1
             for key in black_keys:
                 pygame.draw.rect(*key)
@@ -187,15 +187,6 @@ class Piano:
         for j in range(len(self.status[i])):
             for note in midi:
                 if note["time"] == frame and note["note"] == j + min_range:
-                    if note["volume"] > 0:
-                        self.status[i][j] = True
-                    else:
-                        self.status[i][j] = False
-                    break
+                    self.status[i][j] = note["volume"]
 
         return self.status[i]
-
-
-piano = Piano((1920, 1080), 30)
-piano.add_piano("/home/arjun/asdf.mid")
-piano.export(os.path.join(os.path.realpath(os.path.dirname(__file__)), "asdf.mp4"), True, 1/5)
