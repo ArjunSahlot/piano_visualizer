@@ -177,9 +177,7 @@ class Piano:
 
     def is_black(self, key):
         normalized = (key - 3) % 12
-        if normalized in (2, 4, 7, 9, 11):
-            return True
-        return False
+        return normalized in (1, 3, 6, 8, 10)
 
     def get_play_status(self, frame, i):
         midi = self.midis[i]
