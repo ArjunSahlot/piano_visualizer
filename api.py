@@ -368,10 +368,3 @@ class Piano:
         self.fps = fps
         self.offset = offset
         self.notes = self.parse_midis()
-
-
-video = Video(start_offset=30, end_offset=30)
-piano = Piano(["/home/arjun/jojo1.mid", "/home/arjun/jojo2.mid"], True)
-video.add_piano(piano)
-video.set_audio("/home/arjun/jojo.flac")
-video.export("/home/arjun/work/programming/github/piano_visualizer/asdf.mp4", True, num_cores=6, quick=True)
