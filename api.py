@@ -2,69 +2,76 @@ import os
 import cv2
 import pygame
 import shutil
-from constants import *
 import time
 import sys
 import mido
 import ffmpeg
 from pydub import AudioSegment
 
-class Piano:
-    gap = 4
-
-    def __init__(self, resolution, fps):
+class Video:
+    def __init__(self, resolution=(1920, 1080), fps=30, start_offset=0, end_offset=0):
         self.resolution = resolution
         self.fps = fps
-        self.status = []
-        self.midis = []
-        self.midi_paths = []
-        self.ranges = []
+        self.start_offset = start_offset
+        self.end_offset = end_offset
+        self.audio = ["default"]
+        self.pianos = []
     
-    def add_piano(self, path):
-        self.midi_paths.append(path)
-        midi = mido.MidiFile(path)
-        parsed = self.parse_midi(midi)
-        minimum, maximum = float("inf"), float("-inf")
-        for note in parsed:
-            val = note["note"]
-            maximum = max(val, maximum)
-            minimum = min(val, minimum)
-
-        self.ranges.append((minimum - self.gap, maximum + self.gap))
-        self.midis.append(parsed)
-        self.status.append([0]*(maximum - minimum + 2*self.gap + 1))
-
+    def add_piano(self, piano):
+        self.pianos.append(piano)
+    
+    def set_audio(self, audio, overwrite=True):
+        if overwrite:
+            self.audio = [audio]
+        else:
+            self.audio.append(audio)
 
     def export(self, path, verbose=False, frac_frames=1):
         pardir = os.path.realpath(os.path.dirname(__file__))
-        min_frame, max_frame = float("inf"), float("-inf")
-        for midi in self.midis:
-            for msg in midi:
-                val = msg["time"]
-                max_frame = max(val, max_frame)
-                min_frame = min(val, min_frame)
+
+        if verbose:
+            print("Parsing midis...")
+        for i, piano in enumerate(self.pianos):
+            piano.register(self.fps)
+            if verbose:
+                print(f"Piano {i+1} done")
+        if verbose:
+            print("All pianos done.")
+
+        min_frame, max_frame = min(self.pianos, key=lambda x: x.get_min_time()).get_min_time(), max(self.pianos, key=lambda x: x.get_max_time()).get_max_time()
         
         max_frame = int(frac_frames *  (max_frame - min_frame)) + min_frame
         frames = int(max_frame - min_frame)
 
+
         if verbose:
-            sys.stdout.write("--------------------------------------\n")
-            sys.stdout.write("Exporting video:\n")
-            sys.stdout.write(f"  Resolution: {' by '.join(map(str, self.resolution))}\n")
-            sys.stdout.write(f"  FPS: {self.fps}\n")
-            sys.stdout.write(f"  Frames: {frames}\n\n")
-            sys.stdout.flush()
+            print("-"*50)
+            print("Exporting video:")
+            print(f"  Resolution: {' by '.join(map(str, self.resolution))}")
+            print(f"  FPS: {self.fps}")
+            print(f"  Frames: {frames}\n")
 
             time_start = time.time()
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
         tmp_file = os.path.join(export_dir, "frame.png")
         video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
+        if self.start_offset:
+            if verbose:
+                print("Offseting animation...")
+            pygame.image.save(self.render(-1), tmp_file)
+            image = cv2.imread(tmp_file)
+            for i in range(self.start_offset):
+                video.write(image)
+            print("Animation offseted successfully")
+
         for frame in range(min_frame, max_frame):
             if verbose:
                 time_elapse = round(time.time()-time_start, 3)
                 frame_num = f"{frame+1 - min_frame} of {frames}, "
-                secs_elapse = f"{time_elapse} seconds elapsed. "
+                mins_elapse = time_elapse // 60
+                secs_elapse = round(time_elapse % 60, 3)
+                elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
                 if frames > 1:
                     perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
                 else:
@@ -73,7 +80,7 @@ class Piano:
                 mins = rem_secs // 60
                 secs = rem_secs % 60
                 remaining = f"{mins} mins and {secs} secs remaining."
-                message = frame_num + secs_elapse + perc + remaining
+                message = frame_num + elapse + perc + remaining
                 sys.stdout.write(message)
                 sys.stdout.flush()
             surface = self.render(frame)
@@ -81,49 +88,75 @@ class Piano:
             image = cv2.imread(tmp_file)
             video.write(image)
             if verbose:
-                sys.stdout.write("\b" * len(message))
+                sys.stdout.write("\r")
                 sys.stdout.write(" " * len(message))
                 sys.stdout.write("\b" * len(message))
 
+        if self.end_offset:
+            if verbose:
+                print("Offseting animation...")
+            pygame.image.save(self.render(max_frame+1), tmp_file)
+            image = cv2.imread(tmp_file)
+            for i in range(self.end_offset):
+                video.write(image)
+            print("Animation offseted successfully")
+
         if verbose:
-            sys.stdout.write(f"Finished in {round(time.time()-time_start, 3)} seconds.\n")
-            sys.stdout.write("Releasing video...\n")
-            sys.stdout.flush()
+            print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
+            print("Releasing video...")
 
         video.release()
         cv2.destroyAllWindows()
+        millisecs = frames/self.fps * 1000
+        sounds = []
         if verbose:
-            sys.stdout.write("Converting midis to wavs...\n")
-            sys.stdout.flush()
+            print("Creating music...")
+        for audio_path in self.audio:
+            if audio_path == "default":
+                for i, piano in enumerate(self.pianos):
+                    sounds.extend(piano.gen_wavs(export_dir))
+            else:
+                sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
+        if verbose:
+            print("Created music.")
+
+        if verbose:
+            print("Combining all audios into 1...")
+
+        music_file = os.path.join(export_dir, "piano.wav")
+        sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
+        for i in sounds:
+            sound = sound.overlay(i)
+        sound.export(music_file, format="wav")
+
+        if verbose:
+            print("Done")
+
+        if self.start_offset:
+            if verbose:
+                print("Offsetting music...")
+                s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
+                e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
+                (s_silent + AudioSegment.from_wav(music_file) + e_silent).export(music_file, format="wav")
+                print("Music offsetted successfully")
+
+        print("Compiling video")
         video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
-        for piano in range(len(self.midi_paths)):
-            if verbose:
-                sys.stdout.write(f"Piano {piano + 1}...\n")
-                sys.stdout.flush()
-            os.system(f"timidity {self.midi_paths[piano]} -Ow -o {os.path.join(export_dir, 'piano.wav')}")
-            if frac_frames != 1:
-                millisecs = frames/self.fps * 1000
-                AudioSegment.from_wav(os.path.join(export_dir, "piano.wav"))[0:millisecs].export(os.path.join(export_dir, "piano.wav"), format="wav")
-            if verbose:
-                sys.stdout.write(f"Adding Piano {piano + 1}'s audio to video...\n")
-                sys.stdout.flush()
-            audio = ffmpeg.input(os.path.join(export_dir, "piano.wav")).audio
-            video = ffmpeg.output(video, audio, path, vcodec='copy', acodec='aac', strict='experimental')
-            if verbose:
-                sys.stdout.write(f"Piano {piano + 1} Done\n")
-                sys.stdout.flush()
+        audio = ffmpeg.input(music_file).audio
+        video = ffmpeg.output(video, audio, path, vcodec="copy", acodec="aac", strict="experimental")
         if os.path.isfile(path):
             os.remove(path)
         ffmpeg.run(video)
+        if verbose:
+            print(f"Video Done")
 
         if verbose:
-            sys.stdout.write("Cleaning up...\n")
-            sys.stdout.flush()
+            print("Cleaning up...")
         shutil.rmtree(export_dir)
         if verbose:
-            sys.stdout.write(f"Finished exporting video in {round(time.time()-time_start, 3)} seconds.\n")
-            sys.stdout.write("--------------------------------------\n")
-            sys.stdout.flush()
+            total_time = time.time()-time_start
+            print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
+            print("-"*50)
 
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
@@ -131,60 +164,146 @@ class Piano:
         width, height = self.resolution
         max_height = height/5
         min_height = height/12
-        whitekey_height = min(max_height, max(min_height, (height-100)/(len(self.status)+2)))
+        whitekey_height = min(max_height, max(min_height, (height-100)/(len(self.pianos)+2)))
         blackkey_height = whitekey_height/2.4
         blackkey_width_factor = 3/4
-        offset = height - height/(len(self.status)+1)
-        for i, range_keys in enumerate(self.ranges):
-            y = offset*(i+1) - whitekey_height/2
-            status = self.get_play_status(frame, i)
-            counter = 0
-            range_range = range_keys[1] - range_keys[0]
-            gap = 1 if range_range > 50 else 3
-            key_width = min(width/5, width/((range_range)*7/12))
-            keys_width = (range_range) * (key_width + gap)*7/12
-            black_keys = []
-            for j in range(range_keys[0], range_keys[1]+1):
-                if self.is_black(j):
-                    black_keys.append((surf, (status[j - range_keys[0]] * 2.55, 0, 0), (width/2 - keys_width/2 + (counter+1)*(key_width + gap) - gap/2 - key_width*blackkey_width_factor/2, y, key_width*blackkey_width_factor, blackkey_height)))
-                else:
-                    pygame.draw.rect(surf, (255, 255 - status[j - range_keys[0]] * 2.55, 255 - status[j - range_keys[0]] * 2.55), (width/2 - keys_width/2 + counter*(key_width + gap), y, key_width, whitekey_height))
-                    counter += 1
-            for key in black_keys:
-                pygame.draw.rect(*key)
+        offset = height/len(self.pianos)
+        p_height = offset
+        p_width = width
+        whitekey_width = width/(88*7/12) - 1
+
+        for i, piano in enumerate(self.pianos):
+            p_y = offset * i
+            piano.render(surf, frame, p_y, p_width, p_height, whitekey_height, blackkey_height, whitekey_width, whitekey_width * blackkey_width_factor, 1)
 
         return surf
 
-    def parse_midi(self, midi):
-        tempo = 500000
+
+class Piano:
+    def __init__(self, midis=[], blocks=True, color="default", lighting="rainbow"):
+        self.midis = list(midis)
+        self.blocks = bool(blocks)
+        self.block_speed = 200
+        self.block_rounding = 5
+        self.color = color.lower()
+        self.lighting = lighting.lower()
+        self.notes = []
+        self.fps = None
+        self.block_col = (255, 255, 255)
+        self.white_hit_col = (255, 0, 0)
+        self.white_col = (255, 255, 255)
+        self.black_hit_col = (255, 0, 0)
+        self.black_col = (0, 0, 0)
+    
+    def configure(self, datapath, value):
+        if datapath in self.__dict__.keys():
+            setattr(self, datapath, value)
+    
+    def render(self, surf, frame, y, width, height, wheight, bheight, wwidth, bwidth, gap):
+        counter = 0
+        playing_keys = self.get_play_status(frame)
+        black_keys = []
+        self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
+        
+        for key in range(88):
+            if self.is_black(key):
+                color = self.black_hit_col if key in playing_keys else self.black_col
+                black_keys.append((surf, color, ((counter+1)*(wwidth + gap) - gap/2 - bwidth/2, y + height - wheight, bwidth, bheight)))
+            else:
+                counter += 1
+                color = self.white_hit_col if key in playing_keys else self.white_col
+                pygame.draw.rect(surf, color, (counter*(wwidth + gap), y + height - wheight, wwidth, wheight))
+
+        for key in black_keys:
+            pygame.draw.rect(*key)
+    
+    def render_blocks(self, surf, frame, y, width, height, wwidth, bwidth, gap):
+        for note in self.notes:
+            bottom = (frame - note["start"]) * self.block_speed / self.fps + y + height
+            top = bottom - (note["end"] - note["start"]) * self.block_speed / self.fps
+            if top <= y + height and bottom >= y:
+                x = self.get_key_x(note["note"], wwidth, gap, bwidth)
+                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if self.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
+    
+    def get_key_x(self, key, wwidth, gap, bwidth):
+        counter = 0
+
+        for k in range(key):
+            if not self.is_black(k):
+                counter += 1
+        
+        if self.is_black(key):
+            return (counter+1)*(wwidth + gap) - gap/2 - bwidth/2
+        else:
+            return counter*(wwidth + gap)
+
+    def add_midi(self, path):
+        self.midis.append(path)
+
+    def parse_midis(self):
         final = []
-        frame = 0
-        for track in midi.tracks:
-            for msg in track:
+        for mid in self.midis:
+            tempo = 500000
+            midi = mido.MidiFile(mid)
+            frame = 0
+            start_keys = [None] * 88
+            for msg in midi.tracks[0]:
                 frame += msg.time / midi.ticks_per_beat * tempo / 1000000 * self.fps
                 if msg.is_meta:
                     if msg.type == "set_tempo":
                         tempo = msg.tempo
                 else:
                     if msg.type == "note_on":
-                        curr_note = {}
-                        curr_note["note"] = msg.note
-                        curr_note["volume"] = msg.velocity
-                        curr_note["time"] = round(frame)
-                        final.append(curr_note)
+                        if not msg.velocity:
+                            final.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
+                        else:
+                            start_keys[msg.note - 21] = int(frame)
 
         return final
-
+    
     def is_black(self, key):
         normalized = (key - 3) % 12
         return normalized in (1, 3, 6, 8, 10)
 
-    def get_play_status(self, frame, i):
-        midi = self.midis[i]
-        min_range, _ = self.ranges[i]
-        for j in range(len(self.status[i])):
-            for note in midi:
-                if note["time"] == frame and note["note"] == j + min_range:
-                    self.status[i][j] = note["volume"]
+    def get_play_status(self, frame):
+        playing_keys = []
+        for note in self.notes:
+            if note["start"] <= frame <= note["end"]:
+                playing_keys.append(note["note"])
 
-        return self.status[i]
+        return playing_keys
+    
+    def get_min_time(self):
+        minimum = float("inf")
+        for note in self.notes: minimum = min(note["start"], minimum)
+        return minimum
+    
+    def get_max_time(self):
+        maximum = float("-inf")
+        for note in self.notes: maximum = max(note["end"], maximum)
+        return maximum
+
+    def gen_wavs(self, export_dir):
+        wavs = []
+        for midi in self.midis:
+            wav_path = os.path.join(export_dir, "pianowav.wav")
+            os.system(f"timidity {midi} -Ow -o {wav_path}")
+            try:
+                wavs.append(AudioSegment.from_wav(wav_path))
+            except FileNotFoundError:
+                sys.stderr.write("You might not have timidity installed on your machine.\n")
+                sys.stderr.write("Please have that installed if you are using the midi files as audio.\n")
+                wavs.append(AudioSegment.silent())
+        return wavs
+    
+    def register(self, fps):
+        self.fps = fps
+        self.notes = self.parse_midis()
+        print(self.notes)
+
+
+video = Video(start_offset=30, end_offset=30)
+piano = Piano(["/home/arjun/jojo1.mid", "/home/arjun/jojo2.mid"], True)
+video.add_piano(piano)
+video.set_audio("/home/arjun/jojo.flac")
+video.export("/home/arjun/work/programming/github/piano_visualizer/asdf.mp4", True)
