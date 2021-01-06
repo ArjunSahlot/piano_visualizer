@@ -5,7 +5,7 @@ import shutil
 import time
 import sys
 import mido
-import threading
+import multiprocessing
 import ctypes
 import ffmpeg
 from pydub import AudioSegment
@@ -29,24 +29,24 @@ class Video:
         else:
             self.audio.append(audio)
 
-    def export(self, path, verbose=False, frac_frames=1, num_cores=4, notify=True):
+    def export(self, path, verbose=False, num_cores=4, notify=True, quick=True, **kwargs):
+        if "frac_frames" in kwargs:
+            frac_frames = kwargs["frac_frames"]
+        else:
+            frac_frames = 1
         
         def quick_export(core, start, end):
-            tmp_path = os.path.join(export_dir, f"core{core+1}.png")
-            final = []
+            tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
             for frame in range(start, end+1):
-                surf = self.render(frame)
-                pygame.image.save(surf, tmp_path)
-                final.append(cv2.imread(tmp_path))
-
-            return final
+                surf = self.render(frame-self.start_offset)
+                pygame.image.save(surf, tmp_path.format(frame))
 
         pardir = os.path.realpath(os.path.dirname(__file__))
 
         if verbose:
             print("Parsing midis...")
         for i, piano in enumerate(self.pianos):
-            piano.register(self.fps)
+            piano.register(self.fps, self.start_offset)
             if verbose:
                 print(f"Piano {i+1} done")
         if verbose:
@@ -56,7 +56,6 @@ class Video:
         
         max_frame = int(frac_frames *  (max_frame - min_frame) + min_frame)
         frames = int(max_frame - min_frame)
-
 
         if verbose:
             print("-"*50)
@@ -68,69 +67,74 @@ class Video:
             time_start = time.time()
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
-        tmp_file = os.path.join(export_dir, "frame.png")
+        tmp_file = os.path.join(export_dir, "frame." + "jpg" if quick else "png")
         try:
             if num_cores > 1:
-                class ExportThread(threading.Thread):
-                    def __init__(self, *args, **kwargs):
-                        super().__init__(*args, **kwargs)
-                        self._return = None
-
-                    def run(self):
-                        if self._target is not None:
-                            self._return = self._target(*self._args, **self._kwargs)
-
-                    def join(self, *args, **kwargs):
-                        super().join(*args, **kwargs)
-                        return self._return
-
-                threads = []
+                if num_cores >= multiprocessing.cpu_count():
+                    print("High chance of computer crashing")
+                    core_input = input(f"Are you sure you want to use {num_cores}: ")
+                    try:
+                        core_input = int(core_input)
+                        num_cores = core_input
+                    except ValueError:
+                        if "y" in core_input.lower():
+                            print("Piano Visualizer is not at fault if your computer crashes...")
+                        else:
+                            num_cores = int(input("New core count: "))
+                num_cores = min(num_cores, multiprocessing.cpu_count())
+                processes = []
                 curr_frame = 0
-                frame_inc = frames // num_cores
+                frame_inc = (frames + self.start_offset + self.end_offset) // num_cores
 
                 for i in range(num_cores):
-                    t = ExportThread(target=quick_export, args=(i, curr_frame, curr_frame + frame_inc))
-                    t.start()
-
-                    threads.append(t)
+                    p = multiprocessing.Process(target=quick_export, args=(i, curr_frame, curr_frame + frame_inc))
+                    p.start()
+                    processes.append(p)
 
                     curr_frame += frame_inc + 1
 
                 if verbose:
                     print(f"Exporting {frame_inc} on each of {num_cores} cores...")
-                image_frames = []
-                for i, thread in enumerate(threads):
-                    image_frames.extend(thread.join())
+
+                for i, process in enumerate(processes):
+                    process.join()
                     print(f"Core {i+1} is done.")
+
                 if verbose:
                     print("Finsihed exporting frames.")
-                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
-                if self.start_offset:
-                    if verbose:
-                        print("Offseting animation...")
-                    pygame.image.save(self.render(-1), tmp_file)
-                    image = cv2.imread(tmp_file)
-                    for i in range(self.start_offset):
-                        video.write(image)
-                    if verbose:
-                        print("Animation offseted successfully")
 
-                for image_frame in image_frames:
-                    video.write(image_frame)
-                
+                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
+
+                for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
+                    if verbose:
+                        time_elapse = round(time.time()-time_start, 3)
+                        frame_num = f"{frame+1 - min_frame} of {frames}, "
+                        mins_elapse = time_elapse // 60
+                        secs_elapse = round(time_elapse % 60, 3)
+                        elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
+                        if frames > 1:
+                            perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
+                        else:
+                            perc = f"100% finished. "
+                        rem_secs = round((frames-(frame - min_frame)) * (time_elapse/((frame - min_frame)+1)))
+                        mins = rem_secs // 60
+                        secs = rem_secs % 60
+                        remaining = f"{mins} mins and {secs} secs remaining."
+                        message = frame_num + elapse + perc + remaining
+                        sys.stdout.write(message)
+                        sys.stdout.flush()
+
+                    video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
+
+                    if verbose:
+                        sys.stdout.write("\r")
+                        sys.stdout.write(" " * len(message))
+                        sys.stdout.write("\r")
+
             else:
                 video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
-                if self.start_offset:
-                    if verbose:
-                        print("Offseting animation...")
-                    pygame.image.save(self.render(-1), tmp_file)
-                    image = cv2.imread(tmp_file)
-                    for i in range(self.start_offset):
-                        video.write(image)
-                    if verbose:
-                        print("Animation offseted successfully")
 
-                for frame in range(min_frame, max_frame):
+                for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
                     if verbose:
                         time_elapse = round(time.time()-time_start, 3)
                         frame_num = f"{frame+1 - min_frame} of {frames}, "
@@ -156,16 +160,6 @@ class Video:
                         sys.stdout.write("\r")
                         sys.stdout.write(" " * len(message))
                         sys.stdout.write("\r")
-
-            if self.end_offset:
-                if verbose:
-                    print("Offseting animation...")
-                pygame.image.save(self.render(max_frame+1), tmp_file)
-                image = cv2.imread(tmp_file)
-                for i in range(self.end_offset):
-                    video.write(image)
-                if verbose:
-                    print("Animation offseted successfully")
 
             if verbose:
                 print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
@@ -234,7 +228,7 @@ class Video:
         
         if sys.platform == "linux" and notify:
             os.system(f"notify-send 'Piano Visualizer' 'Finished exporting {path.split('/')[-1]}'")
-
+    
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
         surf.fill((0, 0, 0, 0))
@@ -266,12 +260,13 @@ class Piano:
         self.lighting = lighting.lower()
         self.notes = []
         self.fps = None
+        self.offset = None
         self.block_col = (255, 255, 255)
         self.white_hit_col = (255, 0, 0)
         self.white_col = (255, 255, 255)
         self.black_hit_col = (255, 0, 0)
         self.black_col = (0, 0, 0)
-    
+
     def configure(self, datapath, value):
         if datapath in self.__dict__.keys():
             setattr(self, datapath, value)
@@ -281,7 +276,7 @@ class Piano:
         playing_keys = self.get_play_status(frame)
         black_keys = []
         self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
-        
+
         for key in range(88):
             if self.is_black(key):
                 color = self.black_hit_col if key in playing_keys else self.black_col
@@ -322,7 +317,7 @@ class Piano:
         for mid in self.midis:
             tempo = 500000
             midi = mido.MidiFile(mid)
-            frame = 0
+            frame = self.offset
             start_keys = [None] * 88
             for msg in midi.tracks[0]:
                 frame += msg.time / midi.ticks_per_beat * tempo / 1000000 * self.fps
@@ -351,14 +346,10 @@ class Piano:
         return playing_keys
     
     def get_min_time(self):
-        minimum = float("inf")
-        for note in self.notes: minimum = min(note["start"], minimum)
-        return minimum
+        return min(self.notes, key=lambda x: x["start"])["start"]
     
     def get_max_time(self):
-        maximum = float("-inf")
-        for note in self.notes: maximum = max(note["end"], maximum)
-        return maximum
+        return max(self.notes, key=lambda x: x["end"])["end"]
 
     def gen_wavs(self, export_dir):
         wavs = []
@@ -373,6 +364,14 @@ class Piano:
                 wavs.append(AudioSegment.silent())
         return wavs
     
-    def register(self, fps):
+    def register(self, fps, offset):
         self.fps = fps
+        self.offset = offset
         self.notes = self.parse_midis()
+
+
+video = Video(start_offset=30, end_offset=30)
+piano = Piano(["/home/arjun/jojo1.mid", "/home/arjun/jojo2.mid"], True)
+video.add_piano(piano)
+video.set_audio("/home/arjun/jojo.flac")
+video.export("/home/arjun/work/programming/github/piano_visualizer/asdf.mp4", True, num_cores=6, quick=True)
