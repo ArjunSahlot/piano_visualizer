@@ -5,8 +5,11 @@ import shutil
 import time
 import sys
 import mido
+import threading
+import ctypes
 import ffmpeg
 from pydub import AudioSegment
+
 
 class Video:
     def __init__(self, resolution=(1920, 1080), fps=30, start_offset=0, end_offset=0):
@@ -26,7 +29,18 @@ class Video:
         else:
             self.audio.append(audio)
 
-    def export(self, path, verbose=False, frac_frames=1):
+    def export(self, path, verbose=False, frac_frames=1, num_cores=4, notify=True):
+        
+        def quick_export(core, start, end):
+            tmp_path = os.path.join(export_dir, f"core{core+1}.png")
+            final = []
+            for frame in range(start, end+1):
+                surf = self.render(frame)
+                pygame.image.save(surf, tmp_path)
+                final.append(cv2.imread(tmp_path))
+
+            return final
+
         pardir = os.path.realpath(os.path.dirname(__file__))
 
         if verbose:
@@ -40,7 +54,7 @@ class Video:
 
         min_frame, max_frame = min(self.pianos, key=lambda x: x.get_min_time()).get_min_time(), max(self.pianos, key=lambda x: x.get_max_time()).get_max_time()
         
-        max_frame = int(frac_frames *  (max_frame - min_frame)) + min_frame
+        max_frame = int(frac_frames *  (max_frame - min_frame) + min_frame)
         frames = int(max_frame - min_frame)
 
 
@@ -55,108 +69,171 @@ class Video:
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
         tmp_file = os.path.join(export_dir, "frame.png")
-        video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
-        if self.start_offset:
-            if verbose:
-                print("Offseting animation...")
-            pygame.image.save(self.render(-1), tmp_file)
-            image = cv2.imread(tmp_file)
-            for i in range(self.start_offset):
-                video.write(image)
-            print("Animation offseted successfully")
+        try:
+            if num_cores > 1:
+                class ExportThread(threading.Thread):
+                    def __init__(self, *args, **kwargs):
+                        super().__init__(*args, **kwargs)
+                        self._return = None
 
-        for frame in range(min_frame, max_frame):
-            if verbose:
-                time_elapse = round(time.time()-time_start, 3)
-                frame_num = f"{frame+1 - min_frame} of {frames}, "
-                mins_elapse = time_elapse // 60
-                secs_elapse = round(time_elapse % 60, 3)
-                elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
-                if frames > 1:
-                    perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
-                else:
-                    perc = f"100% finished. "
-                rem_secs = round((frames-(frame - min_frame)) * (time_elapse/((frame - min_frame)+1)))
-                mins = rem_secs // 60
-                secs = rem_secs % 60
-                remaining = f"{mins} mins and {secs} secs remaining."
-                message = frame_num + elapse + perc + remaining
-                sys.stdout.write(message)
-                sys.stdout.flush()
-            surface = self.render(frame)
-            pygame.image.save(surface, tmp_file)
-            image = cv2.imread(tmp_file)
-            video.write(image)
-            if verbose:
-                sys.stdout.write("\r")
-                sys.stdout.write(" " * len(message))
-                sys.stdout.write("\b" * len(message))
+                    def run(self):
+                        if self._target is not None:
+                            self._return = self._target(*self._args, **self._kwargs)
 
-        if self.end_offset:
-            if verbose:
-                print("Offseting animation...")
-            pygame.image.save(self.render(max_frame+1), tmp_file)
-            image = cv2.imread(tmp_file)
-            for i in range(self.end_offset):
-                video.write(image)
-            print("Animation offseted successfully")
+                    def join(self, *args, **kwargs):
+                        super().join(*args, **kwargs)
+                        return self._return
 
-        if verbose:
-            print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
-            print("Releasing video...")
+                threads = []
+                curr_frame = 0
+                frame_inc = frames // num_cores
 
-        video.release()
-        cv2.destroyAllWindows()
-        millisecs = frames/self.fps * 1000
-        sounds = []
-        if verbose:
-            print("Creating music...")
-        for audio_path in self.audio:
-            if audio_path == "default":
-                for i, piano in enumerate(self.pianos):
-                    sounds.extend(piano.gen_wavs(export_dir))
+                for i in range(num_cores):
+                    t = ExportThread(target=quick_export, args=(i, curr_frame, curr_frame + frame_inc))
+                    t.start()
+
+                    threads.append(t)
+
+                    curr_frame += frame_inc + 1
+
+                if verbose:
+                    print(f"Exporting {frame_inc} on each of {num_cores} cores...")
+                image_frames = []
+                for i, thread in enumerate(threads):
+                    image_frames.extend(thread.join())
+                    print(f"Core {i+1} is done.")
+                if verbose:
+                    print("Finsihed exporting frames.")
+                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
+                if self.start_offset:
+                    if verbose:
+                        print("Offseting animation...")
+                    pygame.image.save(self.render(-1), tmp_file)
+                    image = cv2.imread(tmp_file)
+                    for i in range(self.start_offset):
+                        video.write(image)
+                    if verbose:
+                        print("Animation offseted successfully")
+
+                for image_frame in image_frames:
+                    video.write(image_frame)
+                
             else:
-                sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
-        if verbose:
-            print("Created music.")
+                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
+                if self.start_offset:
+                    if verbose:
+                        print("Offseting animation...")
+                    pygame.image.save(self.render(-1), tmp_file)
+                    image = cv2.imread(tmp_file)
+                    for i in range(self.start_offset):
+                        video.write(image)
+                    if verbose:
+                        print("Animation offseted successfully")
 
-        if verbose:
-            print("Combining all audios into 1...")
+                for frame in range(min_frame, max_frame):
+                    if verbose:
+                        time_elapse = round(time.time()-time_start, 3)
+                        frame_num = f"{frame+1 - min_frame} of {frames}, "
+                        mins_elapse = time_elapse // 60
+                        secs_elapse = round(time_elapse % 60, 3)
+                        elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
+                        if frames > 1:
+                            perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
+                        else:
+                            perc = f"100% finished. "
+                        rem_secs = round((frames-(frame - min_frame)) * (time_elapse/((frame - min_frame)+1)))
+                        mins = rem_secs // 60
+                        secs = rem_secs % 60
+                        remaining = f"{mins} mins and {secs} secs remaining."
+                        message = frame_num + elapse + perc + remaining
+                        sys.stdout.write(message)
+                        sys.stdout.flush()
+                    surface = self.render(frame)
+                    pygame.image.save(surface, tmp_file)
+                    image = cv2.imread(tmp_file)
+                    video.write(image)
+                    if verbose:
+                        sys.stdout.write("\r")
+                        sys.stdout.write(" " * len(message))
+                        sys.stdout.write("\r")
 
-        music_file = os.path.join(export_dir, "piano.wav")
-        sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
-        for i in sounds:
-            sound = sound.overlay(i)
-        sound.export(music_file, format="wav")
+            if self.end_offset:
+                if verbose:
+                    print("Offseting animation...")
+                pygame.image.save(self.render(max_frame+1), tmp_file)
+                image = cv2.imread(tmp_file)
+                for i in range(self.end_offset):
+                    video.write(image)
+                if verbose:
+                    print("Animation offseted successfully")
 
-        if verbose:
-            print("Done")
-
-        if self.start_offset:
             if verbose:
-                print("Offsetting music...")
-                s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
-                e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
-                (s_silent + AudioSegment.from_wav(music_file) + e_silent).export(music_file, format="wav")
-                print("Music offsetted successfully")
+                print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
+                print("Releasing video...")
 
-        print("Compiling video")
-        video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
-        audio = ffmpeg.input(music_file).audio
-        video = ffmpeg.output(video, audio, path, vcodec="copy", acodec="aac", strict="experimental")
-        if os.path.isfile(path):
-            os.remove(path)
-        ffmpeg.run(video)
-        if verbose:
-            print(f"Video Done")
+            video.release()
+            cv2.destroyAllWindows()
+            millisecs = frames/self.fps * 1000
+            sounds = []
+            if verbose:
+                print("Creating music...")
+            for audio_path in self.audio:
+                if audio_path == "default":
+                    for i, piano in enumerate(self.pianos):
+                        sounds.extend(piano.gen_wavs(export_dir))
+                else:
+                    sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
+            if verbose:
+                print("Created music.")
 
-        if verbose:
-            print("Cleaning up...")
+            if verbose:
+                print("Combining all audios into 1...")
+
+            music_file = os.path.join(export_dir, "piano.wav")
+            sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
+            for i in sounds:
+                sound = sound.overlay(i)
+            sound.export(music_file, format="wav")
+
+            if verbose:
+                print("Done")
+
+            if self.start_offset:
+                if verbose:
+                    print("Offsetting music...")
+                    s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
+                    e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
+                    (s_silent + AudioSegment.from_wav(music_file) + e_silent).export(music_file, format="wav")
+                    print("Music offsetted successfully")
+
+            print("Compiling video")
+            video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
+            audio = ffmpeg.input(music_file).audio
+            video = ffmpeg.output(video, audio, path, vcodec="copy", acodec="aac", strict="experimental")
+            if os.path.isfile(path):
+                os.remove(path)
+            ffmpeg.run(video)
+            if verbose:
+                print(f"Video Done")
+
+            if verbose:
+                print("Cleaning up...")
+        
+        except Exception as e:
+            print(f"Export interrputed due to {e}")
+            shutil.rmtree(export_dir)
+            if sys.platform == "linux" and notify:
+                os.system(f"notify-send 'Piano Visualizer' 'Export interrupted due to {e}'")
+            ctypes.pointer(ctypes.c_char.from_address(5))[0]
+
         shutil.rmtree(export_dir)
         if verbose:
             total_time = time.time()-time_start
             print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
             print("-"*50)
+        
+        if sys.platform == "linux" and notify:
+            os.system(f"notify-send 'Piano Visualizer' 'Finished exporting {path.split('/')[-1]}'")
 
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
@@ -299,11 +376,3 @@ class Piano:
     def register(self, fps):
         self.fps = fps
         self.notes = self.parse_midis()
-        print(self.notes)
-
-
-video = Video(start_offset=30, end_offset=30)
-piano = Piano(["/home/arjun/jojo1.mid", "/home/arjun/jojo2.mid"], True)
-video.add_piano(piano)
-video.set_audio("/home/arjun/jojo.flac")
-video.export("/home/arjun/work/programming/github/piano_visualizer/asdf.mp4", True)
