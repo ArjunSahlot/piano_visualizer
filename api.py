@@ -53,7 +53,7 @@ class Video:
             print("All pianos done.")
 
         min_frame, max_frame = min(self.pianos, key=lambda x: x.get_min_time()).get_min_time(), max(self.pianos, key=lambda x: x.get_max_time()).get_max_time()
-        
+
         max_frame = int(frac_frames *  (max_frame - min_frame) + min_frame)
         frames = int(max_frame - min_frame)
 
@@ -65,13 +65,15 @@ class Video:
             print(f"  Frames: {frames}\n")
 
             time_start = time.time()
+
+
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
         tmp_file = os.path.join(export_dir, "frame." + "jpg" if quick else "png")
         try:
             if num_cores > 1:
                 if num_cores >= multiprocessing.cpu_count():
-                    print("High chance of computer crashing")
+                    print("High chance of computer freezing")
                     core_input = input(f"Are you sure you want to use {num_cores}: ")
                     try:
                         core_input = int(core_input)
@@ -84,17 +86,17 @@ class Video:
                 num_cores = min(num_cores, multiprocessing.cpu_count())
                 processes = []
                 curr_frame = 0
-                frame_inc = (frames + self.start_offset + self.end_offset) // num_cores
+                frame_inc = (frames + self.start_offset + self.end_offset) / num_cores
 
                 for i in range(num_cores):
-                    p = multiprocessing.Process(target=quick_export, args=(i, curr_frame, curr_frame + frame_inc))
+                    p = multiprocessing.Process(target=quick_export, args=(i, int(curr_frame), int(curr_frame + frame_inc)))
                     p.start()
                     processes.append(p)
 
                     curr_frame += frame_inc + 1
 
                 if verbose:
-                    print(f"Exporting {frame_inc} on each of {num_cores} cores...")
+                    print(f"Exporting {int(frame_inc)} on each of {num_cores} cores...")
 
                 for i, process in enumerate(processes):
                     process.join()
@@ -105,9 +107,11 @@ class Video:
 
                 video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
 
+                if verbose:
+                    time_frame_start = time.time()
                 for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
                     if verbose:
-                        time_elapse = round(time.time()-time_start, 3)
+                        time_elapse = round(time.time()-time_frame_start, 3)
                         frame_num = f"{frame+1 - min_frame} of {frames}, "
                         mins_elapse = time_elapse // 60
                         secs_elapse = round(time_elapse % 60, 3)
@@ -167,7 +171,7 @@ class Video:
 
             video.release()
             cv2.destroyAllWindows()
-            millisecs = frames/self.fps * 1000
+            millisecs = (frames + 1)/self.fps * 1000
             sounds = []
             if verbose:
                 print("Creating music...")
@@ -192,7 +196,7 @@ class Video:
             if verbose:
                 print("Done")
 
-            if self.start_offset:
+            if self.start_offset or self.end_offset:
                 if verbose:
                     print("Offsetting music...")
                     s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
@@ -212,7 +216,7 @@ class Video:
 
             if verbose:
                 print("Cleaning up...")
-        
+
         except Exception as e:
             print(f"Export interrputed due to {e}")
             shutil.rmtree(export_dir)
@@ -251,13 +255,12 @@ class Video:
 
 
 class Piano:
-    def __init__(self, midis=[], blocks=True, color="default", lighting="rainbow"):
+    def __init__(self, midis=[], blocks=True, color="default"):
         self.midis = list(midis)
         self.blocks = bool(blocks)
         self.block_speed = 200
         self.block_rounding = 5
         self.color = color.lower()
-        self.lighting = lighting.lower()
         self.notes = []
         self.fps = None
         self.offset = None
@@ -278,7 +281,7 @@ class Piano:
         self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
 
         for key in range(88):
-            if self.is_black(key):
+            if Piano.is_black(key):
                 color = self.black_hit_col if key in playing_keys else self.black_col
                 black_keys.append((surf, color, ((counter+1)*(wwidth + gap) - gap/2 - bwidth/2, y + height - wheight, bwidth, bheight)))
             else:
@@ -295,17 +298,17 @@ class Piano:
             top = bottom - (note["end"] - note["start"]) * self.block_speed / self.fps
             if top <= y + height and bottom >= y:
                 x = self.get_key_x(note["note"], wwidth, gap, bwidth)
-                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if self.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
+                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if Piano.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
     
     def get_key_x(self, key, wwidth, gap, bwidth):
-        counter = 0
+        counter = 1
 
         for k in range(key):
-            if not self.is_black(k):
+            if not Piano.is_black(k):
                 counter += 1
-        
-        if self.is_black(key):
-            return (counter+1)*(wwidth + gap) - gap/2 - bwidth/2
+
+        if Piano.is_black(key):
+            return counter*(wwidth + gap) - gap/2 - bwidth/2
         else:
             return counter*(wwidth + gap)
 
@@ -313,26 +316,26 @@ class Piano:
         self.midis.append(path)
 
     def parse_midis(self):
-        final = []
+        self.notes = []
         for mid in self.midis:
-            tempo = 500000
             midi = mido.MidiFile(mid)
-            frame = self.offset
-            start_keys = [None] * 88
-            for msg in midi.tracks[0]:
-                frame += msg.time / midi.ticks_per_beat * tempo / 1000000 * self.fps
-                if msg.is_meta:
-                    if msg.type == "set_tempo":
-                        tempo = msg.tempo
-                else:
-                    if msg.type == "note_on":
-                        if not msg.velocity:
-                            final.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
-                        else:
-                            start_keys[msg.note - 21] = int(frame)
+            for track in midi.tracks:
+                tempo = 500000
+                frame = self.offset
+                start_keys = [None] * 88
+                for msg in track:
+                    frame += msg.time / midi.ticks_per_beat * tempo / 1000000 * self.fps
+                    if msg.is_meta:
+                        if msg.type == "set_tempo":
+                            tempo = msg.tempo
+                    else:
+                        if msg.type == "note_on":
+                            if not msg.velocity:
+                                self.notes.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
+                            else:
+                                start_keys[msg.note - 21] = int(frame)
 
-        return final
-    
+    @staticmethod
     def is_black(self, key):
         normalized = (key - 3) % 12
         return normalized in (1, 3, 6, 8, 10)
@@ -361,10 +364,10 @@ class Piano:
             except FileNotFoundError:
                 sys.stderr.write("You might not have timidity installed on your machine.\n")
                 sys.stderr.write("Please have that installed if you are using the midi files as audio.\n")
+                sys.stderr.flush()
                 wavs.append(AudioSegment.silent())
         return wavs
     
     def register(self, fps, offset):
         self.fps = fps
         self.offset = offset
-        self.notes = self.parse_midis()
