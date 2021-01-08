@@ -100,7 +100,8 @@ class Video:
 
                 for i, process in enumerate(processes):
                     process.join()
-                    print(f"Core {i+1} is done.")
+                    if verbose:
+                        print(f"Core {i+1} is done.")
 
                 if verbose:
                     print("Finsihed exporting frames.")
@@ -281,7 +282,7 @@ class Piano:
         self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
 
         for key in range(88):
-            if Piano.is_black(key):
+            if self.is_black(key):
                 color = self.black_hit_col if key in playing_keys else self.black_col
                 black_keys.append((surf, color, ((counter+1)*(wwidth + gap) - gap/2 - bwidth/2, y + height - wheight, bwidth, bheight)))
             else:
@@ -298,16 +299,16 @@ class Piano:
             top = bottom - (note["end"] - note["start"]) * self.block_speed / self.fps
             if top <= y + height and bottom >= y:
                 x = self.get_key_x(note["note"], wwidth, gap, bwidth)
-                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if Piano.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
-    
+                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if self.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
+
     def get_key_x(self, key, wwidth, gap, bwidth):
         counter = 1
 
         for k in range(key):
-            if not Piano.is_black(k):
+            if not self.is_black(k):
                 counter += 1
 
-        if Piano.is_black(key):
+        if self.is_black(key):
             return counter*(wwidth + gap) - gap/2 - bwidth/2
         else:
             return counter*(wwidth + gap)
@@ -335,7 +336,6 @@ class Piano:
                             else:
                                 start_keys[msg.note - 21] = int(frame)
 
-    @staticmethod
     def is_black(self, key):
         normalized = (key - 3) % 12
         return normalized in (1, 3, 6, 8, 10)
@@ -371,3 +371,4 @@ class Piano:
     def register(self, fps, offset):
         self.fps = fps
         self.offset = offset
+        self.parse_midis()
