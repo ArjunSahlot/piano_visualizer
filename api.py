@@ -80,7 +80,7 @@ class Video:
                         num_cores = core_input
                     except ValueError:
                         if "y" in core_input.lower():
-                            print("Piano Visualizer is not at fault if your computer crashes...")
+                            print("Piano Visualizer is not at fault if your computer freezes...")
                         else:
                             num_cores = int(input("New core count: "))
                 num_cores = min(num_cores, multiprocessing.cpu_count())
@@ -179,7 +179,7 @@ class Video:
             for audio_path in self.audio:
                 if audio_path == "default":
                     for i, piano in enumerate(self.pianos):
-                        sounds.extend(piano.gen_wavs(export_dir))
+                        sounds.extend(piano.gen_wavs(export_dir, frames))
                 else:
                     sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
             if verbose:
@@ -354,7 +354,7 @@ class Piano:
     def get_max_time(self):
         return max(self.notes, key=lambda x: x["end"])["end"]
 
-    def gen_wavs(self, export_dir):
+    def gen_wavs(self, export_dir, frames):
         wavs = []
         for midi in self.midis:
             wav_path = os.path.join(export_dir, "pianowav.wav")
@@ -365,9 +365,9 @@ class Piano:
                 sys.stderr.write("You might not have timidity installed on your machine.\n")
                 sys.stderr.write("Please have that installed if you are using the midi files as audio.\n")
                 sys.stderr.flush()
-                wavs.append(AudioSegment.silent())
+                return [AudioSegment.silent(frames)]
         return wavs
-    
+
     def register(self, fps, offset):
         self.fps = fps
         self.offset = offset
