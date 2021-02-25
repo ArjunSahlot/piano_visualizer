@@ -23,13 +23,12 @@ with zipfile.ZipFile(tmp, 'r') as zip:
     zip.extractall(dir)
 
 print("Cleaning up")
-final = os.path.join(dir, file.split("-")[0]
-os.rename(os.path.join(dir, file), final))
+final = os.path.join(dir, file.split("-")[0])
+os.rename(os.path.join(dir, file), final)
 os.remove(os.path.join(tmp))
 
 with open(os.path.join(final, "requirements.txt"), "r") as f:
-    packages = f.read().split("
-")
+    packages = f.read().split("\n")
 
 if sys.platform == "windows":
     cmd = "pip install "
