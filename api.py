@@ -372,7 +372,7 @@ class Piano:
                             tempo = msg.tempo
                     else:
                         if msg.type == "note_on":
-                            if msg.velocity != 0:
+                            if not msg.velocity:
                                 self.notes.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
                             else:
                                 start_keys[msg.note - 21] = int(frame)
