@@ -372,7 +372,7 @@ class Piano:
                             tempo = msg.tempo
                     else:
                         if msg.type == "note_on":
-                            if not msg.velocity:
+                            if msg.velocity != 0:
                                 self.notes.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
                             else:
                                 start_keys[msg.note - 21] = int(frame)
@@ -413,9 +413,3 @@ class Piano:
         self.fps = fps
         self.offset = offset
         self.parse_midis()
-
-
-p = Piano(["/home/arjun/happy_birthday.mid"], True, "rainbow")
-v = Video(start_offset=10, end_offset=10)
-v.add_piano(p)
-v.export("/home/arjun/shuhul_birthday.mp4", True, frac_frames=1/4)
