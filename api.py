@@ -294,7 +294,13 @@ class Piano:
     def configure(self, datapath, value):
         if datapath in self.__dict__.keys():
             setattr(self, datapath, value)
-    
+
+    def render_rect(self, surf, x, y, width, height, color):
+        s = pygame.Surface((width, height), pygame.SRCALPHA)
+        for cy in range(int(height+1)):
+            pygame.draw.rect(s, list(color) + [255*((height-cy)/height)], (0, cy, width, 1))
+        surf.blit(s, (x, y))
+
     def render(self, surf, frame, y, width, height, wheight, bheight, wwidth, bwidth, gap):
         counter = 0
         playing_keys = self.get_play_status(frame)
@@ -310,7 +316,7 @@ class Piano:
                     color = self.get_rainbow(x, width) if self.color == "rainbow" else self.black_hit_col
                 else:
                     color = self.black_col
-                black_keys.append((surf, color, (x, pheight, bwidth, bheight)))
+                black_keys.append(((surf, color, (x, pheight, bwidth, bheight)), (surf, x, pheight, bwidth, bheight, color)))
             else:
                 counter += 1
                 x = counter*(wwidth + gap)
@@ -318,10 +324,12 @@ class Piano:
                     color = self.get_rainbow(x, width) if self.color == "rainbow" else self.white_hit_col
                 else:
                     color = self.white_col
-                pygame.draw.rect(surf, color, (x, pheight, wwidth, wheight))
+                pygame.draw.rect(surf, self.white_col, (x, pheight, wwidth, wheight))
+                self.render_rect(surf, x, pheight, wwidth, wheight, color)
 
         for key in black_keys:
-            pygame.draw.rect(*key)
+            pygame.draw.rect(*key[0])
+            self.render_rect(*key[1])
     
     def render_blocks(self, surf, frame, y, width, height, wwidth, bwidth, gap):
         for note in self.notes:
@@ -405,3 +413,9 @@ class Piano:
         self.fps = fps
         self.offset = offset
         self.parse_midis()
+
+
+p = Piano(["/home/arjun/happy_birthday.mid"], True, "rainbow")
+v = Video(start_offset=10, end_offset=10)
+v.add_piano(p)
+v.export("/home/arjun/shuhul_birthday.mp4", True, frac_frames=1/4)
