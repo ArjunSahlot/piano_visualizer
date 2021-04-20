@@ -316,7 +316,7 @@ class Piano:
                     color = self.get_rainbow(x, width) if self.color == "rainbow" else self.black_hit_col
                 else:
                     color = self.black_col
-                black_keys.append(((surf, color, (x, py, bwidth, bheight)), (surf, x, py, bwidth, bheight, color)))
+                black_keys.append(((surf, self.black_col, (x, py, bwidth, bheight)), (surf, x, py, bwidth, bheight, color)))
             else:
                 counter += 1
                 x = counter*(wwidth + gap)
