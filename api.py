@@ -261,7 +261,7 @@ class Video:
         max_height = height/5
         min_height = height/12
         whitekey_height = min(max_height, max(min_height, (height-100)/(len(self.pianos)+2)))
-        blackkey_height = whitekey_height/2.4
+        blackkey_height = whitekey_height/2
         blackkey_width_factor = 3/4
         offset = height/len(self.pianos)
         p_height = offset
