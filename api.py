@@ -27,6 +27,7 @@ import mido
 import multiprocessing
 import ctypes
 import ffmpeg
+from random_utils.colors.conversions import rgb_to_hsv, hsv_to_rgb
 from pydub import AudioSegment
 
 
@@ -299,15 +300,25 @@ class Piano:
         playing_keys = self.get_play_status(frame)
         black_keys = []
         self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
+        pheight = y + height - wheight
+        surf.fill((0, 0, 0), (0, pheight, width, wheight))
 
         for key in range(88):
             if self.is_black(key):
-                color = self.black_hit_col if key in playing_keys else self.black_col
-                black_keys.append((surf, color, ((counter+1)*(wwidth + gap) - gap/2 - bwidth/2, y + height - wheight, bwidth, bheight)))
+                x = (counter+1)*(wwidth + gap) - gap/2 - bwidth/2
+                if key in playing_keys:
+                    color = self.get_rainbow(x, width) if self.color == "rainbow" else self.black_hit_col
+                else:
+                    color = self.black_col
+                black_keys.append((surf, color, (x, pheight, bwidth, bheight)))
             else:
                 counter += 1
-                color = self.white_hit_col if key in playing_keys else self.white_col
-                pygame.draw.rect(surf, color, (counter*(wwidth + gap), y + height - wheight, wwidth, wheight))
+                x = counter*(wwidth + gap)
+                if key in playing_keys:
+                    color = self.get_rainbow(x, width) if self.color == "rainbow" else self.white_hit_col
+                else:
+                    color = self.white_col
+                pygame.draw.rect(surf, color, (x, pheight, wwidth, wheight))
 
         for key in black_keys:
             pygame.draw.rect(*key)
@@ -318,7 +329,7 @@ class Piano:
             top = bottom - (note["end"] - note["start"]) * self.block_speed / self.fps
             if top <= y + height and bottom >= y:
                 x = self.get_key_x(note["note"], wwidth, gap, bwidth)
-                pygame.draw.rect(surf, self.block_col, (x, top, bwidth if self.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
+                pygame.draw.rect(surf, self.get_rainbow(x, width) if self.color == "rainbow" else self.block_col, (x, top, bwidth if self.is_black(note["note"]) else wwidth, bottom-top), border_radius=self.block_rounding)
 
     def get_key_x(self, key, wwidth, gap, bwidth):
         counter = 1
@@ -331,6 +342,9 @@ class Piano:
             return counter*(wwidth + gap) - gap/2 - bwidth/2
         else:
             return counter*(wwidth + gap)
+
+    def get_rainbow(self, x, width):
+        return hsv_to_rgb(((x/width)*255, 225, 255))
 
     def add_midi(self, path):
         self.midis.append(path)
