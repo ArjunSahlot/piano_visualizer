@@ -306,8 +306,8 @@ class Piano:
         playing_keys = self.get_play_status(frame)
         black_keys = []
         self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
-        pheight = y + height - wheight
-        surf.fill((0, 0, 0), (0, pheight, width, wheight))
+        py = y + height - wheight
+        surf.fill((0, 0, 0), (0, py, width, wheight))
 
         for key in range(88):
             if self.is_black(key):
@@ -316,7 +316,7 @@ class Piano:
                     color = self.get_rainbow(x, width) if self.color == "rainbow" else self.black_hit_col
                 else:
                     color = self.black_col
-                black_keys.append(((surf, color, (x, pheight, bwidth, bheight)), (surf, x, pheight, bwidth, bheight, color)))
+                black_keys.append(((surf, color, (x, py, bwidth, bheight)), (surf, x, py, bwidth, bheight, color)))
             else:
                 counter += 1
                 x = counter*(wwidth + gap)
@@ -324,8 +324,8 @@ class Piano:
                     color = self.get_rainbow(x, width) if self.color == "rainbow" else self.white_hit_col
                 else:
                     color = self.white_col
-                pygame.draw.rect(surf, self.white_col, (x, pheight, wwidth, wheight))
-                self.render_rect(surf, x, pheight, wwidth, wheight, color)
+                pygame.draw.rect(surf, self.white_col, (x, py, wwidth, wheight))
+                self.render_rect(surf, x, py, wwidth, wheight, color)
 
         for key in black_keys:
             pygame.draw.rect(*key[0])
