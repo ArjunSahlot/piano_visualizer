@@ -39,10 +39,10 @@ class Video:
         self.end_offset = end_offset
         self.audio = ["default"]
         self.pianos = []
-    
+
     def add_piano(self, piano):
         self.pianos.append(piano)
-    
+
     def set_audio(self, audio, overwrite=True):
         if overwrite:
             self.audio = [audio]
@@ -54,7 +54,7 @@ class Video:
             frac_frames = kwargs["frac_frames"]
         else:
             frac_frames = 1
-        
+
         def quick_export(core, start, end):
             tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
             for frame in range(start, end+1):
@@ -250,10 +250,10 @@ class Video:
             total_time = time.time()-time_start
             print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
             print("-"*50)
-        
+
         if sys.platform == "linux" and notify:
             os.system(f"notify-send 'Piano Visualizer' 'Finished exporting {path.split('/')[-1]}'")
-    
+
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
         surf.fill((0, 0, 0, 0))
@@ -330,7 +330,7 @@ class Piano:
         for key in black_keys:
             pygame.draw.rect(*key[0])
             self.render_rect(*key[1])
-    
+
     def render_blocks(self, surf, frame, y, width, height, wwidth, bwidth, gap):
         for note in self.notes:
             bottom = (frame - note["start"]) * self.block_speed / self.fps + y + height
@@ -388,10 +388,10 @@ class Piano:
                 playing_keys.append(note["note"])
 
         return playing_keys
-    
+
     def get_min_time(self):
         return min(self.notes, key=lambda x: x["start"])["start"]
-    
+
     def get_max_time(self):
         return max(self.notes, key=lambda x: x["end"])["end"]
 
