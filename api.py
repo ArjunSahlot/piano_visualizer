@@ -133,7 +133,7 @@ class Video:
                 for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
                     if verbose:
                         time_elapse = round(time.time()-time_frame_start, 3)
-                        frame_num = f"{frame+1 - min_frame} of {frames}, "
+                        frame_num = f"{frame+1 - min_frame} of {frames+self.start_offset+self.end_offset}, "
                         mins_elapse = time_elapse // 60
                         secs_elapse = round(time_elapse % 60, 3)
                         elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
