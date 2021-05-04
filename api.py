@@ -58,7 +58,7 @@ class Video:
 
         def quick_export(core, start, end):
             tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
-            for frame in tqdm(range(start, end+1), position=core, desc=f"Core {core+1}", unit="frames"):
+            for frame in tqdm(range(start, end+1), position=core, desc=f"Core {core+1}", unit="frames", leave=False):
                 surf = self.render(frame-self.start_offset)
                 pygame.image.save(surf, tmp_path.format(frame))
 
@@ -117,7 +117,7 @@ class Video:
                 for i, process in enumerate(processes):
                     process.join()
 
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames", postition=num_cores):
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames", position=num_cores):
                     video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
 
             else:
@@ -346,4 +346,4 @@ class Piano:
 p = Piano(["/home/arjun/asdf.mid"], True, "rainbow")
 v = Video(start_offset=30, end_offset=30)
 v.add_piano(p)
-v.export("/home/arjun/asdf.mp4", 6, frac_frames=1)
+v.export("/home/arjun/asdf.mp4", 6, frac_frames=1/5)
