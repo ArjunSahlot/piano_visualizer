@@ -27,7 +27,8 @@ import mido
 import multiprocessing
 import ctypes
 import ffmpeg
-from random_utils.colors.conversions import rgb_to_hsv, hsv_to_rgb
+import threading
+from colorsys import hsv_to_rgb
 from pydub import AudioSegment
 from tqdm import tqdm
 
@@ -58,9 +59,12 @@ class Video:
 
         def quick_export(core, start, end):
             tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
-            for frame in tqdm(range(start, end+1), position=core, desc=f"Core {core+1}", unit="frames", leave=False):
+            for frame in range(start, end+1):
                 surf = self.render(frame-self.start_offset)
                 pygame.image.save(surf, tmp_path.format(frame))
+
+        def progress_bar():
+            pass
 
         pardir = os.path.realpath(os.path.dirname(__file__))
 
@@ -114,10 +118,12 @@ class Video:
 
                     curr_frame += frame_inc + 1
 
+                threading.Thread(target=progress_bar).start()
+
                 for i, process in enumerate(processes):
                     process.join()
 
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames", position=num_cores):
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames"):
                     video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
 
             else:
@@ -283,7 +289,7 @@ class Piano:
             return counter*(wwidth + gap)
 
     def get_rainbow(self, x, width):
-        return hsv_to_rgb(((x/width)*255, 225, 255))
+        return hsv_to_rgb((x/width), 1, 1)
 
     def add_midi(self, path):
         self.midis.append(path)
