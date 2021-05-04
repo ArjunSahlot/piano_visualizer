@@ -30,7 +30,7 @@ import ffmpeg
 import threading
 from colorsys import hsv_to_rgb
 from pydub import AudioSegment
-from tqdm import tqdm
+from tqdm import tqdm, trange
 
 
 class Video:
@@ -63,8 +63,13 @@ class Video:
                 surf = self.render(frame-self.start_offset)
                 pygame.image.save(surf, tmp_path.format(frame))
 
-        def progress_bar():
-            pass
+        def progress_bar(frames, exp_dir):
+            with tqdm(total=frames, unit="frames", desc="Rendering") as t:
+                p = 0
+                while True:
+                    t.update((l:=len(os.listdir(exp_dir)))-p)
+                    p = l
+                    if l == frames: return
 
         pardir = os.path.realpath(os.path.dirname(__file__))
 
@@ -118,16 +123,16 @@ class Video:
 
                     curr_frame += frame_inc + 1
 
-                threading.Thread(target=progress_bar).start()
+                threading.Thread(target=progress_bar, args=(frames+self.start_offset+self.end_offset, export_dir)).start()
 
                 for i, process in enumerate(processes):
                     process.join()
 
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames"):
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing", unit="frames"):
                     video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
 
             else:
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Exporting frames", unit="frames"):
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Exporting", unit="frames"):
                     surface = self.render(frame)
                     pygame.image.save(surface, tmp_file)
                     image = cv2.imread(tmp_file)
