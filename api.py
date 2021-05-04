@@ -50,7 +50,7 @@ class Video:
         else:
             self.audio.append(audio)
 
-    def export(self, path, verbose=False, num_cores=4, notify=True, quick=True, **kwargs):
+    def export(self, path, num_cores=4, notify=True, quick=True, **kwargs):
         if "frac_frames" in kwargs:
             frac_frames = kwargs["frac_frames"]
         else:
@@ -64,29 +64,24 @@ class Video:
 
         pardir = os.path.realpath(os.path.dirname(__file__))
 
-        if verbose:
-            print("Parsing midis...")
+        print("Parsing midis...")
         for i, piano in enumerate(self.pianos):
             piano.register(self.fps, self.start_offset)
-            if verbose:
-                print(f"Piano {i+1} done")
-        if verbose:
-            print("All pianos done.")
+            print(f"Piano {i+1} done")
+        print("All pianos done.")
 
         min_frame, max_frame = min(self.pianos, key=lambda x: x.get_min_time()).get_min_time(), max(self.pianos, key=lambda x: x.get_max_time()).get_max_time()
 
         max_frame = int(frac_frames *  (max_frame - min_frame) + min_frame)
         frames = int(max_frame - min_frame)
 
-        if verbose:
-            print("-"*50)
-            print("Exporting video:")
-            print(f"  Resolution: {' by '.join(map(str, self.resolution))}")
-            print(f"  FPS: {self.fps}")
-            print(f"  Frames: {frames}\n")
+        print("-"*50)
+        print("Exporting video:")
+        print(f"  Resolution: {' by '.join(map(str, self.resolution))}")
+        print(f"  FPS: {self.fps}")
+        print(f"  Frames: {frames}\n")
 
-            time_start = time.time()
-
+        time_start = time.time()
 
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
@@ -113,8 +108,7 @@ class Video:
                 print(f"Exporting {int(frame_inc)} on each of {num_cores} cores...")
 
                 for i in range(num_cores):
-                    import threading
-                    p = threading.Thread(target=quick_export, args=(i, int(curr_frame), int(curr_frame + frame_inc)))
+                    p = multiprocessing.Process(target=quick_export, args=(i, int(curr_frame), int(curr_frame + frame_inc)))
                     p.start()
                     processes.append(p)
 
@@ -123,10 +117,7 @@ class Video:
                 for i, process in enumerate(processes):
                     process.join()
 
-                if verbose:
-                    print("Finished exporting frames.")
-
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1)):
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing frames", postition=num_cores):
                     video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
 
             else:
@@ -136,27 +127,23 @@ class Video:
                     image = cv2.imread(tmp_file)
                     video.write(image)
 
-            if verbose:
-                print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
-                print("Releasing video...")
+            print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
+            print("Releasing video...")
 
             video.release()
             cv2.destroyAllWindows()
             millisecs = (frames + 1)/self.fps * 1000
             sounds = []
-            if verbose:
-                print("Creating music...")
+            print("Creating music...")
             for audio_path in self.audio:
                 if audio_path == "default":
                     for i, piano in enumerate(self.pianos):
                         sounds.extend(piano.gen_wavs(export_dir, frames))
                 else:
                     sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
-            if verbose:
-                print("Created music.")
+            print("Created music.")
 
-            if verbose:
-                print("Combining all audios into 1...")
+            print("Combining all audios into 1...")
 
             music_file = os.path.join(export_dir, "piano.wav")
             sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
@@ -164,16 +151,14 @@ class Video:
                 sound = sound.overlay(i)
             sound.export(music_file, format="wav")
 
-            if verbose:
-                print("Done")
+            print("Done")
 
             if self.start_offset or self.end_offset:
-                if verbose:
-                    print("Offsetting music...")
-                    s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
-                    e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
-                    (s_silent + AudioSegment.from_wav(music_file) + e_silent).export(music_file, format="wav")
-                    print("Music offsetted successfully")
+                print("Offsetting music...")
+                s_silent = AudioSegment.silent(self.start_offset/self.fps * 1000)
+                e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
+                (s_silent + AudioSegment.from_wav(music_file) + e_silent).export(music_file, format="wav")
+                print("Music offsetted successfully")
 
             print("Compiling video")
             video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
@@ -182,11 +167,8 @@ class Video:
             if os.path.isfile(path):
                 os.remove(path)
             ffmpeg.run(video)
-            if verbose:
-                print(f"Video Done")
-
-            if verbose:
-                print("Cleaning up...")
+            print(f"Video Done")
+            print("Cleaning up...")
 
         except Exception as e:
             print(f"Export interrputed due to {e}")
@@ -196,10 +178,9 @@ class Video:
             ctypes.pointer(ctypes.c_char.from_address(5))[0]
 
         shutil.rmtree(export_dir)
-        if verbose:
-            total_time = time.time()-time_start
-            print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
-            print("-"*50)
+        total_time = time.time()-time_start
+        print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
+        print("-"*50)
 
         if sys.platform == "linux" and notify:
             os.system(f"notify-send 'Piano Visualizer' 'Finished exporting {path.split('/')[-1]}'")
@@ -312,7 +293,7 @@ class Piano:
         for mid in self.midis:
             midi = mido.MidiFile(mid)
             for track in midi.tracks:
-                tempo = 5000000
+                tempo = 500000
                 frame = self.offset
                 start_keys = [None] * 88
                 for msg in track:
@@ -332,9 +313,11 @@ class Piano:
         return normalized in (1, 3, 6, 8, 10)
 
     def get_play_status(self, frame):
+        keys = []
         for note in self.notes:
             if note["start"] <= frame <= note["end"]:
-                yield note["note"]
+                keys.append(note["note"])
+        return keys
 
     def get_min_time(self):
         return min(self.notes, key=lambda x: x["start"])["start"]
@@ -358,3 +341,9 @@ class Piano:
         self.fps = fps
         self.offset = offset
         self.parse_midis()
+
+
+p = Piano(["/home/arjun/asdf.mid"], True, "rainbow")
+v = Video(start_offset=30, end_offset=30)
+v.add_piano(p)
+v.export("/home/arjun/asdf.mp4", 6, frac_frames=1)
