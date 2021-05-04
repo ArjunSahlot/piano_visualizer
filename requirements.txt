@@ -3,3 +3,4 @@ opencv-python
 mido
 ffmpeg-python
 pydub
+tqdm

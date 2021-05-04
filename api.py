@@ -29,6 +29,7 @@ import ctypes
 import ffmpeg
 from random_utils.colors.conversions import rgb_to_hsv, hsv_to_rgb
 from pydub import AudioSegment
+from tqdm import tqdm
 
 
 class Video:
@@ -57,7 +58,7 @@ class Video:
 
         def quick_export(core, start, end):
             tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
-            for frame in range(start, end+1):
+            for frame in tqdm(range(start, end+1), position=core, desc=f"Core {core+1}", unit="frames"):
                 surf = self.render(frame-self.start_offset)
                 pygame.image.save(surf, tmp_path.format(frame))
 
@@ -91,6 +92,7 @@ class Video:
         os.makedirs(export_dir, exist_ok=True)
         tmp_file = os.path.join(export_dir, "frame." + "jpg" if quick else "png")
         try:
+            video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
             if num_cores > 1:
                 if num_cores >= multiprocessing.cpu_count():
                     print("High chance of computer freezing")
@@ -108,83 +110,31 @@ class Video:
                 curr_frame = 0
                 frame_inc = (frames + self.start_offset + self.end_offset) / num_cores
 
+                print(f"Exporting {int(frame_inc)} on each of {num_cores} cores...")
+
                 for i in range(num_cores):
-                    p = multiprocessing.Process(target=quick_export, args=(i, int(curr_frame), int(curr_frame + frame_inc)))
+                    import threading
+                    p = threading.Thread(target=quick_export, args=(i, int(curr_frame), int(curr_frame + frame_inc)))
                     p.start()
                     processes.append(p)
 
                     curr_frame += frame_inc + 1
 
-                if verbose:
-                    print(f"Exporting {int(frame_inc)} on each of {num_cores} cores...")
-
                 for i, process in enumerate(processes):
                     process.join()
-                    if verbose:
-                        print(f"Core {i+1} is done.")
 
                 if verbose:
-                    print("Finsihed exporting frames.")
+                    print("Finished exporting frames.")
 
-                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
-
-                if verbose:
-                    time_frame_start = time.time()
-                for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
-                    if verbose:
-                        time_elapse = round(time.time()-time_frame_start, 3)
-                        frame_num = f"{frame+1 - min_frame} of {frames+self.start_offset+self.end_offset}, "
-                        mins_elapse = time_elapse // 60
-                        secs_elapse = round(time_elapse % 60, 3)
-                        elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
-                        if frames > 1:
-                            perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
-                        else:
-                            perc = f"100% finished. "
-                        rem_secs = round((frames-(frame - min_frame)) * (time_elapse/((frame - min_frame)+1)))
-                        mins = rem_secs // 60
-                        secs = rem_secs % 60
-                        remaining = f"{mins} mins and {secs} secs remaining."
-                        message = frame_num + elapse + perc + remaining
-                        sys.stdout.write(message)
-                        sys.stdout.flush()
-
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1)):
                     video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
 
-                    if verbose:
-                        sys.stdout.write("\r")
-                        sys.stdout.write(" " * len(message))
-                        sys.stdout.write("\r")
-
             else:
-                video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
-
-                for frame in range(min_frame, max_frame + self.start_offset + self.end_offset + 1):
-                    if verbose:
-                        time_elapse = round(time.time()-time_start, 3)
-                        frame_num = f"{frame+1 - min_frame} of {frames}, "
-                        mins_elapse = time_elapse // 60
-                        secs_elapse = round(time_elapse % 60, 3)
-                        elapse = f"{mins_elapse} mins and {secs_elapse} secs elapsed. "
-                        if frames > 1:
-                            perc = f"{int(100 * ((frame - min_frame)/(frames-1)))}% finished. "
-                        else:
-                            perc = f"100% finished. "
-                        rem_secs = round((frames-(frame - min_frame)) * (time_elapse/((frame - min_frame)+1)))
-                        mins = rem_secs // 60
-                        secs = rem_secs % 60
-                        remaining = f"{mins} mins and {secs} secs remaining."
-                        message = frame_num + elapse + perc + remaining
-                        sys.stdout.write(message)
-                        sys.stdout.flush()
+                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Exporting frames", unit="frames"):
                     surface = self.render(frame)
                     pygame.image.save(surface, tmp_file)
                     image = cv2.imread(tmp_file)
                     video.write(image)
-                    if verbose:
-                        sys.stdout.write("\r")
-                        sys.stdout.write(" " * len(message))
-                        sys.stdout.write("\r")
 
             if verbose:
                 print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
@@ -362,7 +312,7 @@ class Piano:
         for mid in self.midis:
             midi = mido.MidiFile(mid)
             for track in midi.tracks:
-                tempo = 500000
+                tempo = 5000000
                 frame = self.offset
                 start_keys = [None] * 88
                 for msg in track:
@@ -371,8 +321,8 @@ class Piano:
                         if msg.type == "set_tempo":
                             tempo = msg.tempo
                     else:
-                        if msg.type == "note_on":
-                            if not msg.velocity:
+                        if msg.type in ("note_on", "note_off"):
+                            if not msg.velocity or msg.type == "note_off":
                                 self.notes.append({"note": msg.note - 21, "start": start_keys[msg.note - 21], "end": int(frame)})
                             else:
                                 start_keys[msg.note - 21] = int(frame)
@@ -382,12 +332,9 @@ class Piano:
         return normalized in (1, 3, 6, 8, 10)
 
     def get_play_status(self, frame):
-        playing_keys = []
         for note in self.notes:
             if note["start"] <= frame <= note["end"]:
-                playing_keys.append(note["note"])
-
-        return playing_keys
+                yield note["note"]
 
     def get_min_time(self):
         return min(self.notes, key=lambda x: x["start"])["start"]
@@ -396,18 +343,16 @@ class Piano:
         return max(self.notes, key=lambda x: x["end"])["end"]
 
     def gen_wavs(self, export_dir, frames):
-        wavs = []
         for midi in self.midis:
             wav_path = os.path.join(export_dir, "pianowav.wav")
             os.system(f"timidity {midi} -Ow -o {wav_path}")
             try:
-                wavs.append(AudioSegment.from_wav(wav_path))
+                yield AudioSegment.from_wav(wav_path)
             except FileNotFoundError:
                 sys.stderr.write("You might not have timidity installed on your machine.\n")
                 sys.stderr.write("Please have that installed if you are using the midi files as audio.\n")
                 sys.stderr.flush()
                 return [AudioSegment.silent(frames)]
-        return wavs
 
     def register(self, fps, offset):
         self.fps = fps
