@@ -1,6 +1,7 @@
 pygame
 opencv-python
 mido
+random-utils
 ffmpeg-python
 pydub
 tqdm

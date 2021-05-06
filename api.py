@@ -28,9 +28,11 @@ import multiprocessing
 import ctypes
 import ffmpeg
 import threading
-from colorsys import hsv_to_rgb
+from moviepy.editor import VideoFileClip, concatenate_videoclips
+from random_utils.colors.conversions import hsv_to_rgb
+from random_utils.funcs import crash
 from pydub import AudioSegment
-from tqdm import tqdm, trange
+from tqdm import tqdm
 
 
 class Video:
@@ -51,25 +53,21 @@ class Video:
         else:
             self.audio.append(audio)
 
-    def export(self, path, num_cores=4, notify=True, quick=True, **kwargs):
+    def export(self, path, num_cores=4, notify=True, **kwargs):
         if "frac_frames" in kwargs:
             frac_frames = kwargs["frac_frames"]
         else:
             frac_frames = 1
 
         def quick_export(core, start, end):
-            tmp_path = os.path.join(export_dir, "frame{}" + ".jpg" if quick else ".png")
+            video = cv2.VideoWriter(os.path.join(export_dir, f"video{core}.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
             for frame in range(start, end+1):
-                surf = self.render(frame-self.start_offset)
-                pygame.image.save(surf, tmp_path.format(frame))
-
-        def progress_bar(frames, exp_dir):
-            with tqdm(total=frames, unit="frames", desc="Rendering") as t:
-                p = 0
-                while True:
-                    t.update((l:=len(os.listdir(exp_dir)))-p)
-                    p = l
-                    if l == frames: return
+                with open(os.path.join(export_dir, f"frame{frame}"), "w"):
+                    pass
+                surf = pygame.surfarray.pixels3d(self.render(frame-self.start_offset)).swapaxes(0, 1)
+                video.write(surf)
+            video.release()
+            cv2.destroyAllWindows()
 
         pardir = os.path.realpath(os.path.dirname(__file__))
 
@@ -88,13 +86,13 @@ class Video:
         print("Exporting video:")
         print(f"  Resolution: {' by '.join(map(str, self.resolution))}")
         print(f"  FPS: {self.fps}")
-        print(f"  Frames: {frames}\n")
+        print(f"  Frames: {frames}")
+        print(f"  Duration: {int((frames+self.start_offset+self.end_offset)/self.fps)} secs\n")
 
         time_start = time.time()
 
         export_dir = os.path.join(pardir, "export")
         os.makedirs(export_dir, exist_ok=True)
-        tmp_file = os.path.join(export_dir, "frame." + "jpg" if quick else "png")
         try:
             video = cv2.VideoWriter(os.path.join(export_dir, "video.mp4"), cv2.VideoWriter_fourcc(*"MPEG"), self.fps, self.resolution)
             if num_cores > 1:
@@ -102,8 +100,7 @@ class Video:
                     print("High chance of computer freezing")
                     core_input = input(f"Are you sure you want to use {num_cores}: ")
                     try:
-                        core_input = int(core_input)
-                        num_cores = core_input
+                        num_cores = int(core_input)
                     except ValueError:
                         if "y" in core_input.lower():
                             print("Piano Visualizer is not at fault if your computer freezes...")
@@ -123,45 +120,62 @@ class Video:
 
                     curr_frame += frame_inc + 1
 
-                threading.Thread(target=progress_bar, args=(frames+self.start_offset+self.end_offset, export_dir)).start()
+                time.sleep(.1)  # Wait for all processes to start.
+
+                with tqdm(total=frames, unit="frames", desc="Exporting") as t:
+                    p = 0
+                    while True:
+                        t.update((l:=len(os.listdir(export_dir)))-p)
+                        p = l
+                        if l == frames:
+                            break
 
                 for i, process in enumerate(processes):
                     process.join()
 
-                for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Writing", unit="frames"):
-                    video.write(cv2.imread(os.path.join(export_dir, f"frame{frame}." + "jpg" if quick else "png")))
+                videos = [os.path.join(export_dir, f"video{c}.mp4") for c in range(num_cores)]
+                with tqdm(total=frames+self.start_offset+self.end_offset+num_cores, unit="frames", desc="Concatenating") as t:
+                    for v in videos:
+                        curr_v = cv2.VideoCapture(v)
+                        while curr_v.isOpened():
+                            r, frame = curr_v.read()
+                            if not r: break
+                            video.write(frame)
+                            t.update()
 
             else:
                 for frame in tqdm(range(min_frame, max_frame + self.start_offset + self.end_offset + 1), desc="Exporting", unit="frames"):
-                    surface = self.render(frame)
-                    pygame.image.save(surface, tmp_file)
-                    image = cv2.imread(tmp_file)
-                    video.write(image)
+                    surf = pygame.surfarray.pixels3d(self.render(frame-self.start_offset)).swapaxes(0, 1)
+                    video.write(surf)
+
+            video.release()
+            cv2.destroyAllWindows()
 
             print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
             print("Releasing video...")
 
-            video.release()
-            cv2.destroyAllWindows()
             millisecs = (frames + 1)/self.fps * 1000
             sounds = []
             print("Creating music...")
             for audio_path in self.audio:
                 if audio_path == "default":
                     for i, piano in enumerate(self.pianos):
-                        sounds.extend(piano.gen_wavs(export_dir, frames))
+                        sounds.extend(piano.gen_wavs(export_dir, millisecs))
                 else:
                     sounds.append(AudioSegment.from_file(audio_path, format=audio_path.split(".")[-1])[0:millisecs])
             print("Created music.")
 
             print("Combining all audios into 1...")
-
             music_file = os.path.join(export_dir, "piano.wav")
             sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
             for i in sounds:
                 sound = sound.overlay(i)
-            sound.export(music_file, format="wav")
 
+            # Compress audio to length of video
+            new_sound = sound._spawn(sound.raw_data, overrides={"frame_rate": int(sound.frame_rate*(len(sound)/millisecs))})
+            new_sound.set_frame_rate(sound.frame_rate)
+
+            new_sound.export(music_file, format="wav")
             print("Done")
 
             if self.start_offset or self.end_offset:
@@ -181,16 +195,16 @@ class Video:
             print(f"Video Done")
             print("Cleaning up...")
 
-        except Exception as e:
-            print(f"Export interrputed due to {e}")
+        except (Exception, KeyboardInterrupt) as e:
+            print(f"Export interruputed due to {e}")
             shutil.rmtree(export_dir)
             if sys.platform == "linux" and notify:
                 os.system(f"notify-send 'Piano Visualizer' 'Export interrupted due to {e}'")
-            ctypes.pointer(ctypes.c_char.from_address(5))[0]
+            crash()
 
         shutil.rmtree(export_dir)
         total_time = time.time()-time_start
-        print(f"Finished exporting video in {total_time // 60} mins and {round(total_time % 60, 3)} secs.")
+        print(f"Finished exporting video in {total_time//60} mins and {round(total_time%60, 3)} secs.")
         print("-"*50)
 
         if sys.platform == "linux" and notify:
@@ -294,7 +308,7 @@ class Piano:
             return counter*(wwidth + gap)
 
     def get_rainbow(self, x, width):
-        return hsv_to_rgb((x/width), 1, 1)
+        return hsv_to_rgb(((x/width)*255, 255, 255))
 
     def add_midi(self, path):
         self.midis.append(path)
@@ -305,10 +319,10 @@ class Piano:
             midi = mido.MidiFile(mid)
             for track in midi.tracks:
                 tempo = 500000
-                frame = self.offset
+                frame = 0
                 start_keys = [None] * 88
                 for msg in track:
-                    frame += msg.time / midi.ticks_per_beat * tempo / 1000000 * self.fps
+                    frame += msg.time/midi.ticks_per_beat * tempo/1000000 * self.fps
                     if msg.is_meta:
                         if msg.type == "set_tempo":
                             tempo = msg.tempo
@@ -320,14 +334,13 @@ class Piano:
                                 start_keys[msg.note - 21] = int(frame)
 
     def is_black(self, key):
-        normalized = (key - 3) % 12
-        return normalized in (1, 3, 6, 8, 10)
+        return (key - 3) % 12 in (1, 3, 6, 8, 10)
 
     def get_play_status(self, frame):
-        keys = []
+        keys = set()
         for note in self.notes:
             if note["start"] <= frame <= note["end"]:
-                keys.append(note["note"])
+                keys.add(note["note"])
         return keys
 
     def get_min_time(self):
@@ -336,17 +349,18 @@ class Piano:
     def get_max_time(self):
         return max(self.notes, key=lambda x: x["end"])["end"]
 
-    def gen_wavs(self, export_dir, frames):
+    def gen_wavs(self, export_dir, silent_len):
+        wavs = []
+        wav_path = os.path.join(export_dir, "pianowav.wav")
         for midi in self.midis:
-            wav_path = os.path.join(export_dir, "pianowav.wav")
             os.system(f"timidity {midi} -Ow -o {wav_path}")
             try:
-                yield AudioSegment.from_wav(wav_path)
+                wavs.append(a:=AudioSegment.from_wav(wav_path))
             except FileNotFoundError:
-                sys.stderr.write("You might not have timidity installed on your machine.\n")
-                sys.stderr.write("Please have that installed if you are using the midi files as audio.\n")
-                sys.stderr.flush()
-                return [AudioSegment.silent(frames)]
+                print("You might not have timidity installed on your machine.", file=sys.stderr)
+                print("Please have that installed if you are using the midi files as audio.", file=sys.stderr)
+                return [AudioSegment.silent(silent_len)]
+        return wavs
 
     def register(self, fps, offset):
         self.fps = fps
@@ -355,6 +369,6 @@ class Piano:
 
 
 p = Piano(["/home/arjun/asdf.mid"], True, "rainbow")
-v = Video(start_offset=30, end_offset=30)
+v = Video(fps=30, start_offset=30, end_offset=30)
 v.add_piano(p)
-v.export("/home/arjun/asdf.mp4", 6, frac_frames=1/5)
+v.export("/home/arjun/asdf.mp4", 6, frac_frames=1)
