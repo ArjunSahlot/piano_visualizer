@@ -255,7 +255,7 @@ class Video:
 
 
 class Piano:
-    def __init__(self, midis=[], blocks=True, color="default"):
+    def __init__(self, midis=[], blocks=True, color="rainbow"):
         self.midis = list(midis)
         self.blocks = bool(blocks)
         self.block_speed = 200
