@@ -285,7 +285,8 @@ class Piano:
         counter = 0
         playing_keys = self.get_play_status(frame)
         black_keys = []
-        self.render_blocks(surf, frame, y, width, height -
+        if self.blocks:
+            self.render_blocks(surf, frame, y, width, height -
                            wheight, wwidth, bwidth, gap)
         py = y + height - wheight
         surf.fill((0, 0, 0), (0, py, width, wheight))
