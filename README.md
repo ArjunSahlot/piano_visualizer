@@ -15,7 +15,7 @@ A python library that allows you to export a video in which a piano is playing t
 
 ## How to
 
-`piano_visualizer` was built with the intent to for it to be simple to use. You can render a piano video with simply 4 lines of code!
+`piano_visualizer` was built with the intent for it to be simple to use. You can render a piano video with simply 4 lines of code!
 
 There are 2 main classes: `Piano` and `Video`
 `Piano` takes care of the piano rendering and the midi file parsing
