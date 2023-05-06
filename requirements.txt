@@ -5,3 +5,5 @@ random-utils
 ffmpeg-python
 pydub
 tqdm
+notify-py
+midi2audio

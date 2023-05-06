@@ -40,8 +40,13 @@ video = piano_visualizer.Video((1920, 1080), 30)
 video.add_piano(piano)
 
 # Export video on multiple cores (1 for single)
-video.export("your/export/path.mp4", 6)
+video.export("your/export/path.mp4", num_cores=6)
+
+# You can add music too! (although it is sometimes offset from video)
+# video.export("your/export/path.mp4", num_cores=6, music=True)
 
 # Progress bars should show up
 # Once your video is exported it will be at the path you specified!
 ```
+
+NOTE: For music to work, you need [fluidsynth](https://github.com/FluidSynth/fluidsynth/wiki/Download)

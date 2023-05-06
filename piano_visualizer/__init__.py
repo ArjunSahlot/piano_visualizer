@@ -22,13 +22,11 @@ import cv2
 import pygame
 import shutil
 import time
-import sys
 import mido
 import multiprocessing
-import ctypes
 import ffmpeg
-import threading
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+from notifypy import Notify
+from midi2audio import FluidSynth
 from random_utils.colors.conversions import hsv_to_rgb
 from random_utils.funcs import crash
 from pydub import AudioSegment
@@ -53,7 +51,15 @@ class Video:
         else:
             self.audio.append(audio)
 
-    def export(self, path, num_cores=4, notify=True, **kwargs):
+    def export(self, path, num_cores=4, music=False, notify=True, **kwargs):
+        """
+        Export the video to the given path.
+
+        :param path: destination to where the video will be
+        :param num_cores: number of cores to use for exporting, defaults to 4
+        :param music: whether or not you want music (it is usually not aligned with video unfortunately), defaults to False
+        :param notify: notify the user through a system notification when exporting is done, defaults to True
+        """
         if "frac_frames" in kwargs:
             frac_frames = kwargs["frac_frames"]
         else:
@@ -116,8 +122,7 @@ class Video:
                 num_cores = min(num_cores, multiprocessing.cpu_count())
                 processes = []
                 curr_frame = 0
-                frame_inc = (frames + self.start_offset +
-                             self.end_offset) / num_cores
+                frame_inc = (frames + self.start_offset + self.end_offset) / num_cores
 
                 print(
                     f"Exporting {int(frame_inc)} on each of {num_cores} cores...")
@@ -167,58 +172,64 @@ class Video:
             print(f"Finished in {round(time.time()-time_start, 3)} seconds.")
             print("Releasing video...")
 
-            millisecs = (frames + 1)/self.fps * 1000
-            sounds = []
-            print("Creating music...")
-            for audio_path in self.audio:
-                if audio_path == "default":
-                    for i, piano in enumerate(self.pianos):
-                        sounds.extend(piano.gen_wavs(export_dir, millisecs))
-                else:
-                    sounds.append(AudioSegment.from_file(
-                        audio_path, format=audio_path.split(".")[-1])[0:millisecs])
-            print("Created music.")
+            if music:
+                millisecs = (frames + 1)/self.fps * 1000
+                sounds = []
+                print("Creating music...")
+                for audio_path in self.audio:
+                    if audio_path == "default":
+                        for i, piano in enumerate(self.pianos):
+                            sounds.extend(piano.gen_flac(export_dir, millisecs))
+                    else:
+                        sounds.append(AudioSegment.from_file(
+                            audio_path, format=audio_path.split(".")[-1])[0:millisecs])
+                print("Created music.")
 
-            print("Combining all audios into 1...")
-            music_file = os.path.join(export_dir, "piano.wav")
-            sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
-            for i in sounds:
-                sound = sound.overlay(i)
+                print("Combining all audios into 1...")
+                music_file = os.path.join(export_dir, "piano.flac")
+                sound = sounds.pop(sounds.index(max(sounds, key=lambda x: len(x))))
+                for i in sounds:
+                    sound = sound.overlay(i)
 
-            # Compress audio to length of video
-            new_sound = sound._spawn(sound.raw_data, overrides={
-                                     "frame_rate": int(sound.frame_rate*(len(sound)/millisecs))})
-            new_sound.set_frame_rate(sound.frame_rate)
+                sound.export(music_file, format="flac")
+                # Compress audio to length of video
+                # new_sound = sound._spawn(sound.raw_data, overrides={"frame_rate": int(sound.frame_rate*(len(sound)/millisecs))})
+                # new_sound.set_frame_rate(sound.frame_rate)
 
-            new_sound.export(music_file, format="wav")
-            print("Done")
+                # new_sound.export(music_file, format="flac")
+                print("Done")
 
-            if self.start_offset or self.end_offset:
-                print("Offsetting music...")
-                s_silent = AudioSegment.silent(
-                    self.start_offset/self.fps * 1000)
-                e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
-                (s_silent + AudioSegment.from_wav(music_file) +
-                 e_silent).export(music_file, format="wav")
-                print("Music offsetted successfully")
+                if self.start_offset or self.end_offset:
+                    print("Offsetting music...")
+                    s_silent = AudioSegment.silent(
+                        self.start_offset/self.fps * 1000)
+                    e_silent = AudioSegment.silent(self.end_offset/self.fps * 1000)
+                    (s_silent + AudioSegment.from_file(music_file, "flac") + e_silent).export(music_file, format="flac")
+                    print("Music offsetted successfully")
 
-            print("Compiling video")
-            video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
-            audio = ffmpeg.input(music_file).audio
-            video = ffmpeg.output(
-                video, audio, path, vcodec="copy", acodec="aac", strict="experimental")
-            if os.path.isfile(path):
-                os.remove(path)
-            ffmpeg.run(video)
+                print("Compiling video")
+                video = ffmpeg.input(os.path.join(export_dir, "video.mp4")).video
+                audio = ffmpeg.input(music_file).audio
+                video = ffmpeg.output(
+                    video, audio, path, vcodec="copy", acodec="aac", strict="experimental")
+                if os.path.isfile(path):
+                    os.remove(path)
+                ffmpeg.run(video)
+            else:
+                print("Skipping music...")
+                os.rename(os.path.join(export_dir, "video.mp4"), path)
+
             print(f"Video Done")
             print("Cleaning up...")
 
         except (Exception, KeyboardInterrupt) as e:
-            print(f"Export interruputed due to {e}")
+            print(f"Export interrupted due to {e}")
             shutil.rmtree(export_dir)
-            if sys.platform == "linux" and notify:
-                os.system(
-                    f"notify-send 'Piano Visualizer' 'Export interrupted due to {e}'")
+            if notify:
+                notification = Notify()
+                notification.title = "Piano Visualizer"
+                notification.message = f"Export interrupted due to {e}"
+                notification.send()
             crash()
 
         shutil.rmtree(export_dir)
@@ -227,9 +238,11 @@ class Video:
             f"Finished exporting video in {total_time//60} mins and {round(total_time%60, 3)} secs.")
         print("-"*50)
 
-        if sys.platform == "linux" and notify:
-            os.system(
-                f"notify-send 'Piano Visualizer' 'Finished exporting {path.split('/')[-1]}'")
+        if notify:
+            notification = Notify()
+            notification.title = "Piano Visualizer"
+            notification.message = f"Finished exporting {path.split('/')[-1]}"
+            notification.send()
 
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
@@ -277,8 +290,7 @@ class Piano:
     def render_rect(self, surf, x, y, width, height, color):
         s = pygame.Surface((width, height), pygame.SRCALPHA)
         for cy in range(int(height+1)):
-            pygame.draw.rect(s, list(color) +
-                             [255*((height-cy)/height)], (0, cy, width, 1))
+            pygame.draw.rect(s, list(color) + [255*((height-cy)/height)], (0, cy, width, 1))
         surf.blit(s, (x, y))
 
     def render(self, surf, frame, y, width, height, wheight, bheight, wwidth, bwidth, gap):
@@ -286,8 +298,7 @@ class Piano:
         playing_keys = self.get_play_status(frame)
         black_keys = []
         if self.blocks:
-            self.render_blocks(surf, frame, y, width, height -
-                           wheight, wwidth, bwidth, gap)
+            self.render_blocks(surf, frame, y, width, height - wheight, wwidth, bwidth, gap)
         py = y + height - wheight
         surf.fill((0, 0, 0), (0, py, width, wheight))
 
@@ -309,8 +320,7 @@ class Piano:
                         x, width) if self.color == "rainbow" else self.white_hit_col
                 else:
                     color = self.white_col
-                pygame.draw.rect(surf, self.white_col,
-                                 (x, py, wwidth, wheight))
+                pygame.draw.rect(surf, self.white_col, (x, py, wwidth, wheight))
                 self.render_rect(surf, x, py, wwidth, wheight, color)
 
         for key in black_keys:
@@ -355,7 +365,7 @@ class Piano:
                 frame = 0
                 start_keys = [None] * 88
                 for msg in track:
-                    frame += msg.time/midi.ticks_per_beat * tempo/1000000 * self.fps
+                    frame += msg.time/midi.ticks_per_beat * tempo/1675000 * self.fps
                     if msg.is_meta:
                         if msg.type == "set_tempo":
                             tempo = msg.tempo
@@ -383,20 +393,14 @@ class Piano:
     def get_max_time(self):
         return max(self.notes, key=lambda x: x["end"])["end"]
 
-    def gen_wavs(self, export_dir, silent_len):
-        wavs = []
-        wav_path = os.path.join(export_dir, "pianowav.wav")
+    def gen_flac(self, export_dir, silent_len):
+        flacs = []
+        flacs_path = os.path.join(export_dir, "pianoflac.flac")
         for midi in self.midis:
-            os.system(f"timidity {midi} -Ow -o {wav_path}")
-            try:
-                wavs.append(a := AudioSegment.from_wav(wav_path))
-            except FileNotFoundError:
-                print(
-                    "You might not have timidity installed on your machine.", file=sys.stderr)
-                print(
-                    "Please have that installed if you are using the midi files as audio.", file=sys.stderr)
-                return [AudioSegment.silent(silent_len)]
-        return wavs
+            fs = FluidSynth()
+            fs.midi_to_audio(midi, flacs_path)
+            flacs.append(AudioSegment.from_file(flacs_path, format="flac"))
+        return flacs
 
     def register(self, fps, offset):
         self.fps = fps
