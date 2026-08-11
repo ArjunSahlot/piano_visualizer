@@ -34,13 +34,14 @@ from tqdm import tqdm
 
 
 class Video:
-    def __init__(self, resolution=(1920, 1080), fps=30, start_offset=0, end_offset=0):
+    def __init__(self, resolution=(1920, 1080), fps=30, start_offset=0, end_offset=0, bg=None):
         self.resolution = resolution
         self.fps = fps
         self.start_offset = start_offset
         self.end_offset = end_offset
         self.audio = ["default"]
         self.pianos = []
+        self.bg = bg
 
     def add_piano(self, piano):
         self.pianos.append(piano)
@@ -246,7 +247,23 @@ class Video:
 
     def render(self, frame):
         surf = pygame.Surface(self.resolution, pygame.SRCALPHA)
-        surf.fill((0, 0, 0, 0))
+
+        bg = getattr(self, 'bg', None)
+        if bg is None and self.pianos:
+            bg = getattr(self.pianos[0], 'bg', None)
+
+        if bg is not None:
+            if isinstance(bg, str) and os.path.isfile(bg):
+                if not hasattr(self, '_bg_surf'):
+                    self._bg_surf = pygame.transform.scale(pygame.image.load(bg).convert_alpha(), self.resolution)
+                surf.blit(self._bg_surf, (0, 0))
+            else:
+                try:
+                    surf.fill(pygame.color.Color(bg)[:3])
+                except (ValueError, TypeError):
+                    surf.fill((0, 0, 0, 0))
+        else:
+            surf.fill((0, 0, 0, 0))
         width, height = self.resolution
         max_height = height/5
         min_height = height/12
@@ -268,12 +285,13 @@ class Video:
 
 
 class Piano:
-    def __init__(self, midis=[], blocks=True, color="rainbow"):
+    def __init__(self, midis=[], blocks=True, color="rainbow", bg=None):
         self.midis = list(midis)
         self.blocks = bool(blocks)
         self.block_speed = 200
         self.block_rounding = 5
         self.color = color.lower()
+        self.bg = bg
         self.notes = []
         self.fps = None
         self.offset = None
